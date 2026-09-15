@@ -39,7 +39,35 @@ try {
     const {standard:a, enhanced:b} = latitudeDemo;
     return a.getZoom() === b.getZoom() && a.getPitch() === b.getPitch() && a.getBearing() === b.getBearing() && a.getCenter().lat === b.getCenter().lat;
   }));
-  results.checks.push('Both modes load; camera sync works in both directions, including zoom, bearing and pitch.');
+  results.checks.push('Camera sync works in both directions, including zoom, bearing and pitch.');
+  await page.select('#mode', 'all');
+  await page.waitForFunction(() => latitudeDemo.enhanced.loaded(), {timeout: 60000});
+  const conversion = await page.evaluate(() => {
+    const {baseStyle, enhancedStyle} = latitudeDemo;
+    let converted = 0;
+    for (let i = 0; i < baseStyle.layers.length; i++) {
+      const original = baseStyle.layers[i], changed = enhancedStyle.layers[i];
+      for (const field of ['minzoom', 'maxzoom', 'filter']) {
+        if (JSON.stringify(original[field]) !== JSON.stringify(changed[field])) throw new Error(`Changed ${field}: ${original.id}`);
+      }
+      for (const section of ['paint', 'layout']) {
+        for (const [property, value] of Object.entries(original[section] || {})) {
+          const input = JSON.stringify(value), output = JSON.stringify(changed[section][property]);
+          if (input.includes('["zoom"]')) {
+            if (output.includes('["zoom"]') || !output.includes('["scale"]')) throw new Error(`Unconverted ${original.id}.${property}`);
+            converted++;
+          } else if (input !== output) throw new Error(`Changed constant ${original.id}.${property}`);
+        }
+      }
+    }
+    return converted;
+  });
+  assert(conversion > 100, `Expected broad paint/layout conversion, got ${conversion}`);
+  await page.select('#place', 'tromso');
+  await page.waitForFunction(() => latitudeDemo.enhanced.loaded(), {timeout: 60000});
+  assert.deepEqual(await page.evaluate(() => latitudeDemo.errors), []);
+  await page.screenshot({path: `${output}/all-expressions.png`, fullPage: true});
+  results.checks.push(`All-expressions mode loads after city changes; ${conversion} zoom-based properties converted, constants and visibility gates preserved.`);
   await page.select('#mode', 'ground');
   await page.select('#place', 'helsinki');
   await page.click('#reset');
@@ -126,6 +154,16 @@ try {
     results.pixelWidths.push({path:'symbol layout',latitude,width,expected});
   }
   results.checks.push('Latitude-dependent symbol layout rebuilds correctly at fixed zoom.');
+  await probe.evaluate(() => probeMap.setLayoutProperty('symbol', 'icon-size',
+    ['/', 2 * Math.PI * 6371008.8 / (512 * 2 ** 6), ['scale']]));
+  for (const [latitude, zoom] of [[0,6],[60,5],[-60,5],[0,6]]) {
+    await probe.evaluate(zoom => probeMap.jumpTo({zoom}), zoom);
+    const width = await widthAt(latitude);
+    assert(Math.abs(width - 10) <= 1, `scale layout size at ${latitude}: ${width}`);
+    results.pixelWidths.push({path:'scale symbol layout',latitude,zoom,width,expected:10});
+  }
+  results.checks.push('Scale-dependent symbol layout stays equal at equal ground scale across latitude and zoom changes.');
+
   assert.deepEqual(await probe.evaluate(() => probeErrors), []);
   results.checks.push('Rendered pixel widths double from the equator to ±60° at fixed zoom, including feature paint, return to cached tiles, and feature-state updates.');
   await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2)+'\n');

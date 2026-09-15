@@ -3,11 +3,13 @@
 Two synchronized maps compare an unchanged snapshot of OpenFreeMap Bright with scale-aware road styling. Both maps use the same patched GL JS renderer. No application code injects latitude or scale into the style or rewrites widths on camera moves.
 
 - **Constant ground widths:** a direct `meters / ["scale"]` expression. Widths are estimates by road class, not measurements from OpenStreetMap: paths 2 m, tracks 3 m, service roads 5 m, local streets and links 7 m, secondary/tertiary roads 12 m, primary/trunk roads 16 m, motorways 22 m. Casings add 2 m.
-- **Bright + scale correction:** replaces the original zoom input with `log2(S0 / scale)`, where `S0` is zoom-0 meters per pixel at 45°. This evaluates Bright’s existing curves at an equivalent ground scale instead of multiplying their outputs. At equal meters per pixel, the enhanced widths are equal across cities. Labels, visibility and opacity still use the original Bright zoom rules.
+- **Bright — road widths:** replaces the original zoom input with `log2(S0 / scale)`, where `S0` is zoom-0 meters per pixel at 45°. This evaluates Bright’s existing curves at an equivalent ground scale instead of multiplying their outputs. At equal meters per pixel, the enhanced widths are equal across cities. Labels, visibility and opacity still use the original Bright zoom rules.
+
+- **Bright — all expressions:** applies the same replacement to every zoom-based paint and layout expression, including label sizes, icons, colors, opacity, waterway and railway widths. Numeric layer `minzoom`/`maxzoom`, filters and source tile selection remain unchanged. Visibility does not accept camera expressions, and styling cannot recover features absent from source tiles. OFM’s [TileJSON](https://tiles.openfreemap.org/planet) currently advertises buildings from tile zoom 13 and house numbers from tile zoom 14.
 
 City changes preserve meters per pixel by adjusting zoom by `log2(cos(newLatitude) / cos(oldLatitude))`, within camera zoom limits. Reset restores the initial ground scale at the selected city.
 
-The change applies to road strokes, casings, bridges, tunnels and paths. Other basemap layers retain Bright's styling. Map-center scale is an approximation for a flat Mercator view, not exact sizing everywhere on a globe or under perspective and terrain.
+The first two modes modify road strokes, casings, bridges, tunnels and paths. The third mode also converts zoom expressions in other basemap layers. Map-center scale is an approximation for a flat Mercator view, not exact sizing everywhere on a globe or under perspective and terrain.
 
 ## Build and run
 
@@ -28,7 +30,7 @@ The spec adds `latitude` and `scale` to numeric expressions and evaluation globa
 
 GL JS passes the camera's latitude and nominal Mercator ground scale to paint/layout evaluation and schedules reevaluation when it changes, including pans at fixed zoom. The main style retains the original expression. Worker layer snapshots bind these camera inputs to numbers, so existing tile-building code can evaluate feature and layout expressions without a new worker-global protocol. Feature-state updates retain the current evaluation latitude and scale.
 
-Camera-only paint values use uniforms and require no tile rebuild. Camera-dependent layout or feature paint requires rebuilding affected source tiles. That path is asynchronous and may lag during continuous movement; it is functional but more expensive than camera-only paint. The Bright comparison uses camera-only expressions. Per-frame, feature-dependent camera evaluation would warrant a separate renderer optimization before broad production use.
+Camera-only paint values use uniforms and require no tile rebuild. Camera-dependent layout or feature paint requires rebuilding affected source tiles. That path is asynchronous and may lag during continuous movement; it is functional but more expensive than camera-only paint. The road-width modes use camera-only paint expressions. The all-expressions mode also exercises layout and feature-dependent expressions, so it can trigger tile rebuilds on zoom or latitude changes. Per-frame, feature-dependent camera evaluation would warrant a separate renderer optimization before broad production use.
 
 ## Verify
 
@@ -38,7 +40,7 @@ From this repository root, after building, with a GL JS checkout containing its 
 CHROME_BIN=/path/to/chrome node demos/latitude/verify.mjs /path/to/maplibre-gl-js
 ```
 
-An optional third argument selects a deployed demo URL. The browser test checks city-scale preservation, both sizing modes, synchronization in both directions, unchanged baseline layers, mobile overflow, and rendered pixel widths at 0°, 60° and −60°. It also exercises feature-driven paint, feature-state changes, cached tile revisits and symbol layout. Screenshots and JSON results are saved in the ignored `test-results/` directory. The small readout evaluator is only for captions; rendered-pixel tests verify the actual patched renderer independently.
+An optional third argument selects a deployed demo URL. The browser test checks city-scale preservation, all three sizing modes, synchronization in both directions, unchanged baseline layers, mobile overflow, and rendered pixel widths at 0°, 60° and −60°. It also exercises feature-driven paint, feature-state changes, cached tile revisits and symbol layout. Screenshots and JSON results are saved in the ignored `test-results/` directory. The small readout evaluator is only for captions; rendered-pixel tests verify the actual patched renderer independently.
 
 ## Publish
 

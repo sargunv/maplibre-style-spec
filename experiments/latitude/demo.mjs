@@ -54,6 +54,14 @@ function changeCity(center, scale = groundScale(standard.getZoom(), standard.get
 function enhanceStyle(style, sizing) {
   const result = structuredClone(style);
   for (const layer of result.layers) {
+    if (sizing === 'all') {
+      for (const section of ['paint', 'layout']) {
+        for (const [property, value] of Object.entries(layer[section] || {})) {
+          layer[section][property] = correctedWidth(value);
+        }
+      }
+      continue;
+    }
     if (layer.type !== 'line' || layer['source-layer'] !== 'transportation' ||
         !/^(highway|bridge|tunnel)-/.test(layer.id) || /railway/.test(layer.id)) continue;
     const meters = roadMeters(layer.id) + (layer.id.endsWith('-casing') ? 2 : 0);
@@ -129,10 +137,12 @@ function reportError(error) {
 function setMode() {
   enhancedStyle = enhanceStyle(baseStyle, mode.value);
   enhanced.setStyle(enhancedStyle);
-  document.querySelector('#mode-caption').textContent = mode.value === 'ground' ? 'Road widths in ground meters' : 'Bright curves evaluated by ground scale';
+  document.querySelector('#mode-caption').textContent = mode.value === 'ground' ? 'Road widths in ground meters' : mode.value === 'all' ? 'All Bright expressions use ground scale' : 'Bright width curves use ground scale';
   document.querySelector('#explanation').textContent = mode.value === 'ground'
     ? 'Ground widths are estimates by road class: a local street is 7 m wide. Road casings, bridges, tunnels and paths scale together. These are styling choices, not surveyed road widths.'
-    : 'Bright’s width curves use ground scale, calibrated to the original style at 45°. At the same meters per pixel, widths stay the same across cities. Labels, visibility and opacity still follow Bright’s original zoom rules.';
+    : mode.value === 'all'
+      ? 'All zoom-based paint and layout expressions use ground scale at a 45° reference: labels, icons, colors, opacity and widths. Layer visibility ranges and source tiles still use zoom; features missing from a tile cannot be restored by styling. Layout changes rebuild tiles and may lag while moving.'
+      : 'Bright’s width curves use ground scale, calibrated to the original style at 45°. At the same meters per pixel, widths stay the same across cities. Labels, visibility and opacity still follow Bright’s original zoom rules.';
   document.querySelector('#expression').textContent = JSON.stringify(enhancedStyle.layers.find(layer => layer.id === 'highway-minor').paint['line-width'], null, 2);
   updateReadout();
 }

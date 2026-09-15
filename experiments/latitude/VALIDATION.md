@@ -3,8 +3,9 @@
 - Style spec: 651 unit tests, 2,229 integration tests, 15 packaging tests; typecheck and lint passed.
 - GL JS: 3,346 unit tests and 730 packaging tests; typecheck and lint on changed files passed.
 - A clean build using `build.sh` succeeded from the pinned upstream renderer and packed style-spec patch.
-- Chrome 153: both OFM comparison modes loaded without page or map errors; cameras stayed synchronized in both directions, including zoom, bearing and pitch; the left map's layers matched the original Bright snapshot; the 390 px mobile layout had no horizontal overflow.
+- Chrome 153: all three OFM comparison modes loaded without page or map errors; cameras stayed synchronized in both directions, including zoom, bearing and pitch; the left map's layers matched the original Bright snapshot; the 390 px mobile layout had no horizontal overflow.
 - City selection preserved meters per pixel and enhanced Bright widths while changing zoom. Scale-dependent feature paint measured 10 px at equal ground scale across 0° and ±60° with the corresponding zoom change.
+- All-expressions mode converts 111 zoom-based paint/layout properties, preserves constants and layer visibility gates, and loads after city changes. Scale-dependent symbol layout measured 10 px at equal scale across 0° and ±60° with corresponding zoom changes.
 - Actual canvas pixels, at fixed zoom: a camera-sized 10 px line measured 10 px at 0°, 20 px at 60°, 20 px at −60°, and 10 px after returning to 0°. Feature-driven widths passed the same sequence. A feature-state increment at 60° produced 28 px as expected. Latitude-dependent symbol layout measured 10, 20, 20 and 10 px over the same camera sequence.
 - Relative to the renderer's recorded bundle-size fixture, main + shared bundles grow by 3,213 bytes raw / 978 bytes gzip. Worker entry size is unchanged.
 
