@@ -99,6 +99,8 @@ export type FeatureState = {[_: string]: any};
 
 export type GlobalProperties = Readonly<{
     zoom: number;
+    /** Geographic map center latitude in degrees, positive north. */
+    latitude?: number;
     heatmapDensity?: number;
     elevation?: number;
     lineProgress?: number;
@@ -290,6 +292,7 @@ export class ZoomConstantExpression<Kind extends EvaluationKind> {
     kind: Kind;
     isStateDependent: boolean;
     globalStateRefs: Set<string>;
+    readonly isLatitudeDependent?: boolean;
     _styleExpression: StyleExpression;
     readonly _globalState: Record<string, any>;
 
@@ -299,6 +302,7 @@ export class ZoomConstantExpression<Kind extends EvaluationKind> {
         this.isStateDependent =
             kind !== ('constant' as EvaluationKind) && !isStateConstant(expression.expression);
         this.globalStateRefs = findGlobalStateRefs(expression.expression);
+        this.isLatitudeDependent = !isGlobalPropertyConstant(expression.expression, ['latitude']);
         this._globalState = globalState;
     }
 
@@ -350,6 +354,7 @@ export class ZoomDependentExpression<Kind extends EvaluationKind> {
     zoomStops: Array<number>;
     isStateDependent: boolean;
     globalStateRefs: Set<string>;
+    readonly isLatitudeDependent?: boolean;
     _styleExpression: StyleExpression;
     interpolationType: InterpolationType;
     readonly _globalState: Record<string, any>;
@@ -367,6 +372,7 @@ export class ZoomDependentExpression<Kind extends EvaluationKind> {
         this.isStateDependent =
             kind !== ('camera' as EvaluationKind) && !isStateConstant(expression.expression);
         this.globalStateRefs = findGlobalStateRefs(expression.expression);
+        this.isLatitudeDependent = !isGlobalPropertyConstant(expression.expression, ['latitude']);
         this.interpolationType = interpolationType;
         this._globalState = globalState;
     }
@@ -431,6 +437,7 @@ export function isZoomExpression(
 export type ConstantExpression = {
     kind: 'constant';
     globalStateRefs: Set<string>;
+    readonly isLatitudeDependent?: boolean;
     readonly _globalState: Record<string, any>;
     readonly evaluate: (
         globals: GlobalProperties,
@@ -445,6 +452,7 @@ export type SourceExpression = {
     kind: 'source';
     isStateDependent: boolean;
     globalStateRefs: Set<string>;
+    readonly isLatitudeDependent?: boolean;
     readonly _globalState: Record<string, any>;
     readonly evaluate: (
         globals: GlobalProperties,
@@ -459,6 +467,7 @@ export type SourceExpression = {
 export type CameraExpression = {
     kind: 'camera';
     globalStateRefs: Set<string>;
+    readonly isLatitudeDependent?: boolean;
     readonly _globalState: Record<string, any>;
     readonly evaluate: (
         globals: GlobalProperties,
@@ -476,6 +485,7 @@ export type CompositeExpression = {
     kind: 'composite';
     isStateDependent: boolean;
     globalStateRefs: Set<string>;
+    readonly isLatitudeDependent?: boolean;
     readonly _globalState: Record<string, any>;
     readonly evaluate: (
         globals: GlobalProperties,
@@ -512,6 +522,10 @@ export function createPropertyExpression(
     const isFeatureConstantResult = isFeatureConstant(parsed);
     if (!isFeatureConstantResult && !supportsPropertyExpression(propertySpec)) {
         return error([new ExpressionParsingError('', 'data expressions not supported')]);
+    }
+
+    if (!isGlobalPropertyConstant(parsed, ['latitude']) && !supportsZoomExpression(propertySpec)) {
+        return error([new ExpressionParsingError('', 'latitude expressions not supported')]);
     }
 
     const isZoomConstant = isGlobalPropertyConstant(parsed, ['zoom']);
@@ -827,10 +841,18 @@ function addGlobalState(
     globals: GlobalProperties,
     globalState: Record<string, any>
 ): GlobalProperties {
-    const {zoom, heatmapDensity, elevation, lineProgress, isSupportedScript, accumulated} =
-        globals ?? {};
+    const {
+        zoom,
+        latitude,
+        heatmapDensity,
+        elevation,
+        lineProgress,
+        isSupportedScript,
+        accumulated
+    } = globals ?? {};
     return {
         zoom,
+        latitude,
         heatmapDensity,
         elevation,
         lineProgress,

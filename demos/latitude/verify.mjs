@@ -1,0 +1,119 @@
+import {createRequire} from 'node:module';
+import {resolve} from 'node:path';
+import {mkdir, writeFile} from 'node:fs/promises';
+import assert from 'node:assert/strict';
+
+const rendererRoot = process.argv[2];
+if (!rendererRoot) throw new Error('Usage: node demos/latitude/verify.mjs /path/to/maplibre-gl-js [demo-url]');
+const require = createRequire(resolve(rendererRoot, 'package.json'));
+const puppeteer = require('puppeteer');
+const {PNG} = require('pngjs');
+const url = process.argv[3] || 'http://127.0.0.1:8765/demos/latitude/';
+const output = resolve('demos/latitude/test-results');
+await mkdir(output, {recursive: true});
+const browser = await puppeteer.launch({headless: true, executablePath: process.env.CHROME_BIN || undefined});
+const results = {url, browser: await browser.version(), checks: [], pixelWidths: []};
+try {
+  const page = await browser.newPage();
+  await page.setViewport({width: 1440, height: 1000, deviceScaleFactor: 1});
+  const pageErrors = [];
+  page.on('pageerror', error => pageErrors.push(error.message));
+  await page.goto(url, {waitUntil: 'domcontentloaded'});
+  await page.waitForFunction(() => window.latitudeDemo?.standard.loaded() && window.latitudeDemo?.enhanced.loaded(), {timeout: 60000});
+  assert.deepEqual(await page.evaluate(() => latitudeDemo.errors), []);
+  await page.screenshot({path: `${output}/desktop.png`, fullPage: true});
+  await page.select('#mode', 'latitude');
+  await page.select('#place', 'singapore');
+  await page.waitForFunction(() => latitudeDemo.enhanced.loaded(), {timeout: 60000});
+  assert(await page.evaluate(() => {
+    const {standard:a, enhanced:b} = latitudeDemo;
+    return a.getZoom() === 16 && a.getCenter().lat === b.getCenter().lat && a.getCenter().lng === b.getCenter().lng;
+  }));
+  await page.evaluate(() => latitudeDemo.enhanced.jumpTo({center: [2.349, 48.858], zoom: 16.5, bearing: 20, pitch: 30}));
+  assert(await page.evaluate(() => {
+    const {standard:a, enhanced:b} = latitudeDemo;
+    return a.getZoom() === b.getZoom() && a.getPitch() === b.getPitch() && a.getBearing() === b.getBearing() && a.getCenter().lat === b.getCenter().lat;
+  }));
+  results.checks.push('Both modes load; camera sync works in both directions, including zoom, bearing and pitch.');
+  await page.select('#mode', 'ground');
+  await page.select('#place', 'helsinki');
+  await page.click('#reset');
+  await page.waitForFunction(() => latitudeDemo.standard.loaded() && latitudeDemo.enhanced.loaded(), {timeout: 60000});
+  assert.equal(await page.evaluate(() => JSON.stringify(latitudeDemo.standard.getStyle().layers) === JSON.stringify(latitudeDemo.baseStyle.layers)), true);
+  results.checks.push('Standard Bright layers remain unchanged.');
+  await page.setViewport({width: 390, height: 844, deviceScaleFactor: 1});
+  await page.waitForFunction(() => document.querySelector('#standard').clientWidth === 390);
+  assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await page.screenshot({path: `${output}/mobile.png`, fullPage: true});
+  results.checks.push('Mobile layout has no horizontal overflow.');
+  assert.deepEqual(pageErrors, []);
+  assert.deepEqual(await page.evaluate(() => latitudeDemo.errors), []);
+
+  const probe = await browser.newPage();
+  await probe.setViewport({width: 512, height: 256, deviceScaleFactor: 1});
+  await probe.goto(new URL('./bright.json', url).href);
+  await probe.evaluate(async (bundleUrl) => {
+    const {Map, setWorkerUrl} = await import(bundleUrl);
+    setWorkerUrl(new URL('./maplibre-gl-worker.mjs', bundleUrl).href);
+    document.body.innerHTML = '<div id="probe" style="position:fixed;inset:0"></div>';
+    window.probeErrors = [];
+    window.probeMap = new Map({container:'probe', center:[0,0], zoom:6, fadeDuration:0,
+      canvasContextAttributes:{preserveDrawingBuffer:true},
+      style:{version:8,sources:{roads:{type:'geojson',data:{type:'FeatureCollection',features:[0,60,-60].map((latitude,id)=>({type:'Feature',id,properties:{width:10},geometry:{type:'LineString',coordinates:[[-2,latitude],[2,latitude]]}}))}}},
+        layers:[{id:'background',type:'background',paint:{'background-color':'white'}},
+          {id:'road',type:'line',source:'roads',paint:{'line-color':'#145dc0','line-width':['/',10,['cos',['*',['latitude'],['/', ['pi'],180]]]]}}]}});
+    probeMap.on('error', event=>probeErrors.push(event.error.message));
+  }, new URL('./assets/maplibre-gl.mjs', url).href);
+
+  async function widthAt(latitude) {
+    await probe.evaluate(latitude => probeMap.jumpTo({center:[0,latitude]}), latitude);
+    await probe.waitForFunction(() => probeMap.loaded(), {timeout: 30000});
+    await probe.evaluate(() => new Promise(resolve => {probeMap.once('render',resolve);probeMap.triggerRepaint();}));
+    const dataUrl = await probe.evaluate(() => probeMap.getCanvas().toDataURL());
+    const png = PNG.sync.read(Buffer.from(dataUrl.split(',')[1], 'base64'));
+    let width = 0;
+    for (let y = 0; y < png.height; y++) {
+      const offset = (y * png.width + Math.floor(png.width / 2)) * 4;
+      if (png.data[offset + 2] > png.data[offset] + 60) width++;
+    }
+    return width;
+  }
+  for (const [latitude, expected] of [[0,10],[60,20],[-60,20],[0,10]]) {
+    const width = await widthAt(latitude);
+    assert(Math.abs(width - expected) <= 1, `camera width at ${latitude}: ${width}, expected ${expected}`);
+    results.pixelWidths.push({path:'camera paint',latitude,width,expected});
+  }
+  await probe.evaluate(() => probeMap.setPaintProperty('road','line-width',
+    ['/', ['+', ['get','width'], ['coalesce',['feature-state','extra'],0]], ['cos',['*',['latitude'],['/', ['pi'],180]]]]));
+  for (const [latitude, expected] of [[0,10],[60,20],[-60,20],[0,10]]) {
+    const width = await widthAt(latitude);
+    assert(Math.abs(width - expected) <= 1, `feature width at ${latitude}: ${width}, expected ${expected}`);
+    results.pixelWidths.push({path:'feature paint',latitude,width,expected});
+  }
+  await widthAt(60);
+  await probe.evaluate(() => probeMap.setFeatureState({source:'roads',id:1},{extra:4}));
+  const stateWidth = await widthAt(60);
+  assert(Math.abs(stateWidth - 28) <= 1, `feature state width: ${stateWidth}`);
+  results.pixelWidths.push({path:'feature state',latitude:60,width:stateWidth,expected:28});
+  await probe.evaluate(() => {
+    probeMap.removeLayer('road');
+    probeMap.removeSource('roads');
+    const data = new Uint8Array(10 * 10 * 4);
+    for (let i = 0; i < data.length; i += 4) data.set([20, 93, 192, 255], i);
+    probeMap.addImage('square', {width:10, height:10, data});
+    probeMap.addSource('points', {type:'geojson', data:{type:'FeatureCollection', features:[0,60,-60].map(latitude =>
+      ({type:'Feature', properties:{}, geometry:{type:'Point', coordinates:[0,latitude]}}))}});
+    probeMap.addLayer({id:'symbol',type:'symbol',source:'points',layout:{'icon-image':'square', 'icon-allow-overlap':true,
+      'icon-size':['/',1,['cos',['*',['latitude'],['/', ['pi'],180]]]]}});
+  });
+  for (const [latitude, expected] of [[0,10],[60,20],[-60,20],[0,10]]) {
+    const width = await widthAt(latitude);
+    assert(Math.abs(width - expected) <= 1, `layout icon size at ${latitude}: ${width}, expected ${expected}`);
+    results.pixelWidths.push({path:'symbol layout',latitude,width,expected});
+  }
+  results.checks.push('Latitude-dependent symbol layout rebuilds correctly at fixed zoom.');
+  assert.deepEqual(await probe.evaluate(() => probeErrors), []);
+  results.checks.push('Rendered pixel widths double from the equator to ±60° at fixed zoom, including feature paint, return to cached tiles, and feature-state updates.');
+  await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2)+'\n');
+  console.log(JSON.stringify(results, null, 2));
+} finally { await browser.close(); }

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Road width × latitude — MapLibre experiment</title>
+  <link rel="stylesheet" href="./assets/maplibre-gl.css">
+  <link rel="stylesheet" href="./demo.css">
+</head>
+<body>
+  <header>
+    <div class="heading"><a class="back" href="../">MapLibre experiments</a><h1>Road width <span>×</span> latitude</h1></div>
+    <p class="intro">Two maps. One camera. Explore how latitude changes the ground distance represented by a pixel.</p>
+  </header>
+  <nav aria-label="Comparison settings">
+    <label>Go to <select id="place"><option value="helsinki">Helsinki · 60° N</option><option value="tromso">Tromsø · 70° N</option><option value="paris">Paris · 49° N</option><option value="singapore">Singapore · 1° N</option><option value="sydney">Sydney · 34° S</option></select></label>
+    <label>Right map <select id="mode"><option value="ground">Constant ground widths</option><option value="latitude">Bright + latitude correction</option></select></label>
+    <button id="reset" type="button">Reset view</button>
+    <output id="camera" aria-label="Shared camera position">Loading maps…</output>
+  </nav>
+  <main>
+    <section class="pane" aria-label="Standard Bright map">
+      <div class="pane-title"><h2>Standard Bright</h2><span>Original road widths</span></div>
+      <div id="standard" class="map"></div>
+      <div class="measurement"><span>Local-street width · center scale</span><strong id="standard-width">—</strong></div>
+    </section>
+    <section class="pane enhanced" aria-label="Latitude-aware Bright map">
+      <div class="pane-title"><h2>Latitude-aware Bright</h2><span id="mode-caption">Road widths in ground meters</span></div>
+      <div id="enhanced" class="map"></div>
+      <div class="measurement"><span>Local-street width · center scale</span><strong id="enhanced-width">—</strong></div>
+    </section>
+  </main>
+  <div id="error" role="alert" hidden></div>
+  <footer>
+    <p id="explanation">Ground widths are estimates by road class: a local street is 7 m wide. Road casings, bridges, tunnels and paths scale together. These are styling choices, not surveyed road widths.</p>
+    <p class="hint">Drag or zoom either map; the other follows. City changes keep the zoom. Ground sizing approximates scale near the center on flat Mercator; pitch, terrain and latitude variation across the view need more than this input.</p>
+    <details><summary>How this works & source</summary><div class="details-body">
+      <p>The proposed <code>["latitude"]</code> expression reads map-center latitude inside the renderer. The page supplies no latitude state to the style. Base-2 zoom interpolation and <code>1 / cos(latitude)</code> turn a ground length into pixels.</p>
+      <pre id="expression"></pre>
+      <p><a href="https://github.com/sargunv/maplibre-style-spec/tree/sargunv/latitude-expression">Style-spec implementation & demo source</a> · <a href="./renderer.patch">GL JS patch</a> · <a href="./build-info.json">Build versions</a></p>
+      <p>Experimental fork; not an upstream MapLibre release. Both maps use the same patched renderer and the same saved <a href="https://openfreemap.org/">OpenFreeMap Bright</a> style. The left style is unchanged. Basemap attribution is shown on each map.</p>
+    </div></details>
+  </footer>
+  <script type="module" src="./demo.mjs"></script>
+</body>
+</html>

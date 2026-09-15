@@ -26,6 +26,19 @@ export function validateExpression(options: any): Array<ValidationError> {
         (expression.value as any)._styleExpression.expression;
 
     if (
+        options.expressionContext !== 'property' &&
+        !isGlobalPropertyConstant(expressionObj, ['latitude'])
+    ) {
+        return [
+            new ValidationError(
+                options.key,
+                options.value,
+                '"latitude" expressions are only supported in camera-enabled style properties.'
+            )
+        ];
+    }
+
+    if (
         options.expressionContext === 'property' &&
         options.propertyKey === 'text-font' &&
         !expressionObj.outputDefined()

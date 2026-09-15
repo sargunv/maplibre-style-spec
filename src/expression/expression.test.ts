@@ -23,8 +23,9 @@ const definitionList = Object.keys(expressions)
 test('v8.json includes all definitions from style-spec', () => {
     const v8List = Object.keys(v8.expression_name.values);
     const v8SupportedList = v8List.filter((expression) => {
-        //filter out expressions that are not supported in GL-JS
-        return !!v8.expression_name.values[expression]['sdk-support']['basic functionality']['js'];
+        // Include experimental parser definitions without released SDK support; exclude Native-only operators.
+        const support = v8.expression_name.values[expression]['sdk-support']['basic functionality'];
+        return Object.keys(support).length === 0 || !!support['js'];
     });
     expect(definitionList).toEqual(v8SupportedList.sort());
 });

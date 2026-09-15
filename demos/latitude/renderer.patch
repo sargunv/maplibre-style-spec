@@ -1,0 +1,282 @@
+diff --git a/src/data/program_configuration.ts b/src/data/program_configuration.ts
+index 199abbb95..80361262b 100644
+--- a/src/data/program_configuration.ts
++++ b/src/data/program_configuration.ts
+@@ -54,6 +54,7 @@ type PaintOptions = {
+     canonical?: CanonicalTileID;
+     formattedSection?: FormattedSection;
+     globalState?: Record<string, any>;
++    latitude?: number;
+ };
+ 
+ /**
+@@ -587,7 +588,7 @@ export class ProgramConfiguration {
+                         //AHM: Remove after https://github.com/mapbox/mapbox-gl-js/issues/6255
+                         const value = (layer.paint as any).get(property);
+                         binder.expression = value.value;
+-                        binder.updatePaintArray(pos.start, pos.end, feature, fs.state, options);
++                        binder.updatePaintArray(pos.start, pos.end, feature, fs.state, {...options, latitude: value.parameters.latitude});
+                         dirty = true;
+                     }
+                 }
+diff --git a/src/style/bind_camera_latitude.ts b/src/style/bind_camera_latitude.ts
+new file mode 100644
+index 000000000..690b394af
+--- /dev/null
++++ b/src/style/bind_camera_latitude.ts
+@@ -0,0 +1,30 @@
++import type {LayerSpecification} from '@maplibre/maplibre-gl-style-spec';
++
++/**
++ * Binds camera latitude in worker paint and layout expressions to a tile-build snapshot.
++ * Literal data, source metadata, and the main-thread style remain unchanged. Workers can then
++ * use their existing zoom/feature evaluation and buffer construction paths.
++ */
++export function bindCameraLatitude(layer: LayerSpecification, latitude: number | undefined): LayerSpecification {
++    if (latitude === undefined) return layer;
++    const result = {...layer};
++    for (const section of ['paint', 'layout'] as const) {
++        if (!layer[section]) continue;
++        result[section] = Object.fromEntries(Object.entries(layer[section]).map(([name, value]) =>
++            [name, bindValue(value, latitude)]));
++    }
++    return result;
++}
++
++/** Recursively binds expression arguments, including formatting options, while preserving literals. */
++function bindValue(value: unknown, latitude: number): unknown {
++    if (Array.isArray(value)) {
++        if (value[0] === 'literal') return value;
++        if (value.length === 1 && value[0] === 'latitude') return latitude;
++        return value.map(argument => bindValue(argument, latitude));
++    }
++    if (value && typeof value === 'object') {
++        return Object.fromEntries(Object.entries(value).map(([key, argument]) => [key, bindValue(argument, latitude)]));
++    }
++    return value;
++}
+diff --git a/src/style/evaluation_parameters.ts b/src/style/evaluation_parameters.ts
+index d38f0e47b..f189c8369 100644
+--- a/src/style/evaluation_parameters.ts
++++ b/src/style/evaluation_parameters.ts
+@@ -15,6 +15,7 @@ export type CrossfadeParameters = {
+  */
+ export class EvaluationParameters implements GlobalProperties {
+     zoom: number;
++    latitude?: number;
+     now: number;
+     fadeDuration: number;
+     zoomHistory: ZoomHistory;
+@@ -22,6 +23,7 @@ export class EvaluationParameters implements GlobalProperties {
+     // "options" may also be another EvaluationParameters to copy, see CrossFadedProperty.possiblyEvaluate
+     constructor(zoom: number, options?: any) {
+         this.zoom = zoom;
++        this.latitude = options?.latitude;
+ 
+         if (options) {
+             this.now = options.now || 0;
+diff --git a/src/style/latitude.test.ts b/src/style/latitude.test.ts
+new file mode 100644
+index 000000000..013a78f7a
+--- /dev/null
++++ b/src/style/latitude.test.ts
+@@ -0,0 +1,48 @@
++import {describe, expect, test} from 'vitest';
++import {createStyleLayer} from './create_style_layer.ts';
++import {EvaluationParameters} from './evaluation_parameters.ts';
++import {bindCameraLatitude} from './bind_camera_latitude.ts';
++import {LineFloorwidthProperty} from './style_layer/line_style_layer.ts';
++import lineProperties from './style_layer/line_style_layer_properties.g.ts';
++import {PropertyValue} from './properties.ts';
++import type {LineStyleLayer} from './style_layer/line_style_layer.ts';
++import type {LayerSpecification} from '@maplibre/maplibre-gl-style-spec';
++
++describe('camera latitude', () => {
++    test('recalculates road width and integer-zoom floor width at constant zoom', () => {
++        const layer = createStyleLayer({id: 'road', type: 'line', source: 'roads', paint: {
++            'line-width': ['interpolate', ['exponential', 2], ['zoom'],
++                0, ['/', 1, ['cos', ['*', ['latitude'], ['/', ['pi'], 180]]]],
++                1, ['/', 2, ['cos', ['*', ['latitude'], ['/', ['pi'], 180]]]]]
++        }}, {}) as LineStyleLayer;
++        expect(layer.isLatitudeDependent).toBe(true);
++        expect(layer.latitudeRequiresRelayout).toBe(false);
++        for (const latitude of [0, 60, -60]) {
++            layer.recalculate(new EvaluationParameters(0.5, {latitude}), []);
++            const scale = 1 / Math.cos(latitude * Math.PI / 180);
++            expect(layer.paint.get('line-width').constantOr(0)).toBeCloseTo(Math.SQRT2 * scale);
++            const floor = new LineFloorwidthProperty(lineProperties.paint.properties['line-width'].specification, 'line-floorwidth');
++            const value = new PropertyValue(floor, layer.getPaintProperty('line-width'), 'line-width', {});
++            expect(floor.possiblyEvaluate(value, new EvaluationParameters(0.5, {latitude})).constantOr(0)).toBeCloseTo(scale);
++        }
++    });
++
++    test('binds worker snapshots for feature paint and layout without changing the public style', () => {
++        const definition: LayerSpecification = {id: 'road', type: 'line', source: 'roads',
++            metadata: {example: ['latitude']},
++            layout: {'line-sort-key': ['abs', ['latitude']]},
++            paint: {'line-width': ['+', ['abs', ['latitude']], ['get', 'width']]}
++        };
++        const layer = createStyleLayer(definition, {}) as LineStyleLayer;
++        expect(layer.latitudeRequiresRelayout).toBe(true);
++        const worker = createStyleLayer(bindCameraLatitude(definition, -60), {}) as LineStyleLayer;
++        worker.recalculate(new EvaluationParameters(0), []);
++        expect(worker.paint.get('line-width').evaluate({type: 2, properties: {width: 7}}, {})).toBe(67);
++        expect(worker.layout.get('line-sort-key').constantOr(0)).toBe(60);
++        expect(worker.isLatitudeDependent).toBe(false);
++        expect(layer.getPaintProperty('line-width')).toEqual(definition.paint['line-width']);
++        expect(bindCameraLatitude(definition, 10).metadata).toEqual(definition.metadata);
++        const literal: LayerSpecification = {id: 'symbol', type: 'symbol', source: 'roads', layout: {'text-font': ['literal', ['latitude']]}};
++        expect(bindCameraLatitude(literal, 60)).toEqual(literal);
++    });
++});
+diff --git a/src/style/style.ts b/src/style/style.ts
+index 06d522fe1..54ac5a60b 100644
+--- a/src/style/style.ts
++++ b/src/style/style.ts
+@@ -1,4 +1,5 @@
+ import {mat4} from 'gl-matrix';
++import {bindCameraLatitude} from './bind_camera_latitude.ts';
+ import {throwIfAborted} from '../util/abort_error.ts';
+ import {ErrorEvent, Evented} from '../util/evented.ts';
+ import {MapSourceDataEvent, MapStyleDataEvent, MapStyleLoadEvent, type MapEventType} from '../ui/events.ts';
+@@ -236,6 +237,8 @@ export class Style extends Evented<MapEventType> {
+     _symbolPlacementTriggered: boolean;
+     _placedProjectionTransition: number;
+     _globalState: Record<string, any>;
++    /** Camera latitude used for the latest style evaluation and worker snapshots. */
++    cameraLatitude?: number;
+     crossTileSymbolIndex: CrossTileSymbolIndex;
+     pauseablePlacement: PauseablePlacement;
+     placement: Placement;
+@@ -509,12 +512,13 @@ export class Style extends Evented<MapEventType> {
+ 
+     private _createLayers() {
+         const dereferencedLayers = derefLayers(this.stylesheet.layers);
++        this.cameraLatitude = this.map.getCenter().lat;
+ 
+         this.setGlobalState(this.stylesheet.state ?? null);
+ 
+         // Broadcast layers to workers first, so that expensive style processing (createStyleLayer)
+         // can happen in parallel on both main and worker threads.
+-        this.dispatcher.broadcast(MessageType.setLayers, dereferencedLayers);
++        this.dispatcher.broadcast(MessageType.setLayers, dereferencedLayers.map(layer => bindCameraLatitude(layer, this.cameraLatitude)));
+ 
+         this._order = dereferencedLayers.map((layer) => layer.id);
+         this._layers = {};
+@@ -705,6 +709,8 @@ export class Style extends Evented<MapEventType> {
+             return;
+         }
+ 
++        this.updateCameraLatitude(parameters.latitude);
++
+         const changed = this._changed;
+         if (changed) {
+             if (this._imagesListDirty) {
+@@ -811,9 +817,28 @@ export class Style extends Evented<MapEventType> {
+         }
+     }
+ 
++    /**
++     * Updates worker expression snapshots and rebuilds only sources whose buffers depend on latitude.
++     * Camera-only paint values are evaluated on the main thread each frame and need no tile reload.
++     */
++    private updateCameraLatitude(latitude: number | undefined): void {
++        if (latitude === undefined || latitude === this.cameraLatitude) return;
++        this.cameraLatitude = latitude;
++        const updatedIds: string[] = [];
++        const sources = new Set<string>();
++        for (const layer of Object.values(this._layers)) {
++            if (!layer.isLatitudeDependent) continue;
++            updatedIds.push(layer.id);
++            if (layer.latitudeRequiresRelayout && layer.source) sources.add(layer.source);
++        }
++        if (updatedIds.length) this._updateWorkerLayers(updatedIds, []);
++        for (const source of sources) this._reloadSource(source);
++        if (sources.size) this.triggerSymbolPlacement();
++    }
++
+     _updateWorkerLayers(updatedIds: string[], removedIds: string[]): void {
+         this.dispatcher.broadcast(MessageType.updateLayers, {
+-            layers: this._serializeByIds(updatedIds, false),
++            layers: this._serializeByIds(updatedIds, false).map(layer => bindCameraLatitude(layer, this.cameraLatitude)),
+             removedIds
+         });
+     }
+diff --git a/src/style/style_layer.ts b/src/style/style_layer.ts
+index 34a26ddc3..6e3f41c89 100644
+--- a/src/style/style_layer.ts
++++ b/src/style/style_layer.ts
+@@ -182,6 +182,19 @@ export abstract class StyleLayer extends Evented<ErrorEventType> {
+         return this._unevaluatedLayout.getValue(name);
+     }
+ 
++    /** Whether any paint or layout expression observes camera latitude. */
++    get isLatitudeDependent(): boolean {
++        return Object.values(this._unevaluatedLayout?._values ?? {}).some(value => value.expression.isLatitudeDependent) ||
++            Object.values(this._transitionablePaint?._values ?? {}).some(value => value.value.expression.isLatitudeDependent);
++    }
++
++    /** Latitude-dependent layout and feature attributes are baked into worker tile buffers. */
++    get latitudeRequiresRelayout(): boolean {
++        return Object.values(this._unevaluatedLayout?._values ?? {}).some(value => value.expression.isLatitudeDependent) ||
++            Object.values(this._transitionablePaint?._values ?? {}).some(value =>
++                value.value.expression.isLatitudeDependent && value.value.isDataDriven());
++    }
++
+     /**
+      * Get list of global state references that are used within layout or filter properties.
+      * This is used to determine if layer source need to be reloaded when global state property changes.
+diff --git a/src/style/style_layer/line_style_layer.ts b/src/style/style_layer/line_style_layer.ts
+index 6c9489b0d..8ae975a61 100644
+--- a/src/style/style_layer/line_style_layer.ts
++++ b/src/style/style_layer/line_style_layer.ts
+@@ -18,6 +18,7 @@ export class LineFloorwidthProperty extends DataDrivenProperty<number> {
+     possiblyEvaluate(value: any, parameters: EvaluationParameters): PossiblyEvaluatedPropertyValue<number> {
+         parameters = new EvaluationParameters(Math.floor(parameters.zoom), {
+             now: parameters.now,
++            latitude: parameters.latitude,
+             fadeDuration: parameters.fadeDuration,
+             zoomHistory: parameters.zoomHistory,
+             transition: parameters.transition
+diff --git a/src/ui/map.ts b/src/ui/map.ts
+index d7fee72b9..da6cc33b4 100644
+--- a/src/ui/map.ts
++++ b/src/ui/map.ts
+@@ -815,7 +815,7 @@ export class Map extends Evented<MapEventType> {
+         }
+         this._imageQueueHandle = ImageRequest.addThrottleControl(() => this.isMoving());
+ 
+-        this.on('move', () => this._update(false));
++        this.on('move', () => this._update(this.style?.cameraLatitude !== this.getCenter().lat));
+         this.on('moveend', () => this._update(false));
+         this.on('zoom', () => this._update(true));
+         this.on('terrain', () => {
+@@ -4389,6 +4389,7 @@ export class Map extends Evented<MapEventType> {
+ 
+             const parameters = new EvaluationParameters(zoom, {
+                 now: currentTime,
++                latitude: this.getCenter().lat,
+                 fadeDuration,
+                 zoomHistory: this.style.zoomHistory,
+                 transition: this.style.getTransition()
+diff --git a/src/util/test/util.ts b/src/util/test/util.ts
+index 383543d99..3da1e5ede 100644
+--- a/src/util/test/util.ts
++++ b/src/util/test/util.ts
+@@ -1,4 +1,5 @@
+ import {vi, expect, onTestFinished, type Mock} from 'vitest';
++import type {LngLat} from '../../geo/lng_lat.ts';
+ import {Map, type MapOptions} from '../../ui/map.ts';
+ import {NullWebGL2RenderingContext} from './null_gl.ts';
+ import {extend} from '../../util/util.ts';
+@@ -39,6 +40,10 @@ export class StubMap extends Evented {
+         return 1;
+     }
+ 
++    getCenter(): LngLat {
++        return this.transform.center;
++    }
++
+     getPixelRatio(): number {
+         return 1;
+     }

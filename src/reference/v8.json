@@ -4824,6 +4824,22 @@
           }
         }
       },
+      "latitude": {
+        "doc": "Returns the geographic latitude of the current map center in degrees, positive north and negative south, between -90 and 90. Available in paint and layout properties that support zoom expressions. Latitude can be used in arithmetic and updates continuously as the map center changes, even at constant zoom. It is a camera input, not a feature or tile latitude. Ground-size conversions based on this value approximate local scale near the map center; they do not guarantee ground dimensions across the viewport, under pitch, on globe, or over terrain.",
+        "syntax": {
+          "overloads": [
+            {
+              "parameters": [],
+              "output-type": "number"
+            }
+          ]
+        },
+        "example": ["latitude"],
+        "group": "Zoom",
+        "sdk-support": {
+          "basic functionality": {}
+        }
+      },
       "zoom": {
         "doc": "Gets the current zoom level.  Note that in style layout and paint properties, `[\"zoom\"]` may only appear as the input to a top-level `\"step\"` or `\"interpolate\"` expression.",
         "syntax": {

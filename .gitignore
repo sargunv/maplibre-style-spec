@@ -17,3 +17,8 @@ docs/assets/*
 !docs/types.md
 !docs/sprite.md
 !docs/deprecations.md
+
+# Built experiment bundles and local browser evidence
+demos/latitude/assets/
+demos/latitude/build-info.json
+demos/latitude/test-results/

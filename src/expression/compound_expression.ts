@@ -278,6 +278,23 @@ CompoundExpression.register(expressions, {
     'geometry-type': [StringType, [], (ctx) => ctx.geometryType()],
     id: [ValueType, [], (ctx) => ctx.id()],
     zoom: [NumberType, [], (ctx) => ctx.globals.zoom],
+    latitude: [
+        NumberType,
+        [],
+        (ctx) => {
+            const latitude = ctx.globals.latitude;
+            if (
+                typeof latitude !== 'number' ||
+                !Number.isFinite(latitude) ||
+                Math.abs(latitude) > 90
+            ) {
+                throw new Error(
+                    'The latitude expression requires a map center latitude between -90 and 90 degrees.'
+                );
+            }
+            return latitude;
+        }
+    ],
     'heatmap-density': [NumberType, [], (ctx) => ctx.globals.heatmapDensity || 0],
     elevation: [NumberType, [], (ctx) => ctx.globals.elevation || 0],
     'line-progress': [NumberType, [], (ctx) => ctx.globals.lineProgress || 0],
@@ -598,6 +615,7 @@ function isExpressionConstant(expression: Expression) {
         isFeatureConstant(expression) &&
         isGlobalPropertyConstant(expression, [
             'zoom',
+            'latitude',
             'heatmap-density',
             'elevation',
             'line-progress',
