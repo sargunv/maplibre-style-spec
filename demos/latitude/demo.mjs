@@ -6,8 +6,9 @@ const places = {
   paris: [2.349, 48.858], singapore: [103.851, 1.290], sydney: [151.209, -33.869]
 };
 const circumference = 2 * Math.PI * 6371008.8;
-const latitudeRadians = ['*', ['max', -85.05112878, ['min', 85.05112878, ['latitude']]], ['/', ['pi'], 180]];
-const correction = ['/', Math.cos(Math.PI / 4), ['cos', latitudeRadians]];
+const referenceScaleAtZero = circumference * Math.cos(Math.PI / 4) / 512;
+const initialScale = groundScale(16, places.helsinki[1]);
+const scaleZoom = ['log2', ['/', referenceScaleAtZero, ['scale']]];
 const errors = [];
 let standard, enhanced, baseStyle, enhancedStyle, synchronizing = false;
 const mode = document.querySelector('#mode');
@@ -24,21 +25,30 @@ function roadMeters(id) {
   return 7;
 }
 
-/** A top-level zoom curve, with latitude evaluated by the renderer at each stop. */
-function groundWidth(meters) {
-  const w0 = ['/', meters * 512 / circumference, ['cos', latitudeRadians]];
-  return ['interpolate', ['exponential', 2], ['zoom'], 0, w0, 24, ['*', 2 ** 24, w0]];
+/** Nominal ground resolution for a flat Mercator map, in meters per CSS pixel. */
+function groundScale(zoom, latitude) {
+  return circumference * Math.cos(latitude * Math.PI / 180) / (512 * 2 ** zoom);
 }
 
-/** Scales stop outputs while retaining the original camera curve and its zoom restrictions. */
+function zoomForScale(scale, latitude) {
+  return Math.log2(circumference * Math.cos(latitude * Math.PI / 180) / (512 * scale));
+}
+
+/** Physical width using the experimental scale input directly. */
+function groundWidth(meters) {
+  return ['/', meters, ['scale']];
+}
+
+/** Evaluates Bright's original curve at its equivalent zoom at the 45° reference latitude. */
 function correctedWidth(value) {
-  if (Array.isArray(value) && value[0] === 'interpolate') {
-    return value.map((part, index) => index >= 4 && index % 2 === 0 ? ['*', part, correction] : part);
-  }
-  if (Array.isArray(value) && value[0] === 'step') {
-    return value.map((part, index) => index >= 2 && index % 2 === 0 ? ['*', part, correction] : part);
-  }
-  return ['*', value, correction];
+  if (!Array.isArray(value)) return value;
+  if (value[0] === 'zoom') return scaleZoom;
+  if (value[0] === 'literal') return value;
+  return value.map(part => Array.isArray(part) ? correctedWidth(part) : part);
+}
+
+function changeCity(center, scale = groundScale(standard.getZoom(), standard.getCenter().lat)) {
+  standard.jumpTo({center, zoom: zoomForScale(scale, center[1])});
 }
 
 function enhanceStyle(style, sizing) {
@@ -63,6 +73,8 @@ function evaluate(expression, zoom, latitude) {
   const ev = value => evaluate(value, zoom, latitude);
   if (op === 'zoom') return zoom;
   if (op === 'latitude') return latitude;
+  if (op === 'scale') return groundScale(zoom, latitude);
+  if (op === 'log2') return Math.log2(ev(args[0]));
   if (op === 'pi') return Math.PI;
   if (op === '*') return args.map(ev).reduce((a, b) => a * b, 1);
   if (op === '/') return ev(args[0]) / ev(args[1]);
@@ -88,8 +100,8 @@ function evaluate(expression, zoom, latitude) {
 function updateReadout() {
   if (!standard || !baseStyle || !enhancedStyle) return;
   const latitude = standard.getCenter().lat, zoom = standard.getZoom();
-  const metersPerPixel = circumference * Math.cos(latitude * Math.PI / 180) / (512 * 2 ** zoom);
-  document.querySelector('#camera').textContent = `${Math.abs(latitude).toFixed(3)}° ${latitude < 0 ? 'S' : 'N'}  ·  zoom ${zoom.toFixed(2)}  ·  ${(1 / Math.cos(latitude * Math.PI / 180)).toFixed(2)}× equator scale`;
+  const metersPerPixel = groundScale(zoom, latitude);
+  document.querySelector('#camera').textContent = `${Math.abs(latitude).toFixed(3)}° ${latitude < 0 ? 'S' : 'N'}  ·  zoom ${zoom.toFixed(2)}  ·  ${metersPerPixel.toFixed(3)} m/px`;
   for (const [id, style] of [['standard', baseStyle], ['enhanced', enhancedStyle]]) {
     const width = style.layers.find(layer => layer.id === 'highway-minor').paint['line-width'];
     const px = evaluate(width, zoom, latitude);
@@ -117,10 +129,10 @@ function reportError(error) {
 function setMode() {
   enhancedStyle = enhanceStyle(baseStyle, mode.value);
   enhanced.setStyle(enhancedStyle);
-  document.querySelector('#mode-caption').textContent = mode.value === 'ground' ? 'Road widths in ground meters' : 'Bright zoom curves · calibrated at 45°';
+  document.querySelector('#mode-caption').textContent = mode.value === 'ground' ? 'Road widths in ground meters' : 'Bright curves evaluated by ground scale';
   document.querySelector('#explanation').textContent = mode.value === 'ground'
     ? 'Ground widths are estimates by road class: a local street is 7 m wide. Road casings, bridges, tunnels and paths scale together. These are styling choices, not surveyed road widths.'
-    : 'Latitude correction keeps Bright’s original zoom curves. Widths match the standard style at 45° latitude and scale by cos(45°) / cos(latitude). This isolates latitude; it does not keep ground width constant while zooming.';
+    : 'Bright’s width curves use ground scale, calibrated to the original style at 45°. At the same meters per pixel, widths stay the same across cities. Labels, visibility and opacity still follow Bright’s original zoom rules.';
   document.querySelector('#expression').textContent = JSON.stringify(enhancedStyle.layers.find(layer => layer.id === 'highway-minor').paint['line-width'], null, 2);
   updateReadout();
 }
@@ -140,10 +152,10 @@ try {
   }
   standard.on('move', () => synchronize(standard, enhanced));
   enhanced.on('move', () => synchronize(enhanced, standard));
-  document.querySelector('#place').addEventListener('change', event => standard.jumpTo({center: places[event.target.value]}));
+  document.querySelector('#place').addEventListener('change', event => changeCity(places[event.target.value]));
   mode.addEventListener('change', setMode);
-  document.querySelector('#reset').addEventListener('click', () => standard.jumpTo({center: places[document.querySelector('#place').value], zoom: 16, bearing: 0, pitch: 0}));
+  document.querySelector('#reset').addEventListener('click', () => { changeCity(places[document.querySelector('#place').value], initialScale); standard.jumpTo({bearing: 0, pitch: 0}); });
   document.querySelector('#expression').textContent = JSON.stringify(groundWidth(7), null, 2);
   updateReadout();
-  window.latitudeDemo = {standard, enhanced, errors, groundWidth, correctedWidth, enhanceStyle, get baseStyle() {return baseStyle;}, get enhancedStyle() {return enhancedStyle;}};
+  window.latitudeDemo = {standard, enhanced, errors, groundWidth, correctedWidth, enhanceStyle, groundScale, zoomForScale, get baseStyle() {return baseStyle;}, get enhancedStyle() {return enhancedStyle;}};
 } catch (error) { reportError(error); }

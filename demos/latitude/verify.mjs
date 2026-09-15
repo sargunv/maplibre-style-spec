@@ -22,13 +22,18 @@ try {
   await page.waitForFunction(() => window.latitudeDemo?.standard.loaded() && window.latitudeDemo?.enhanced.loaded(), {timeout: 60000});
   assert.deepEqual(await page.evaluate(() => latitudeDemo.errors), []);
   await page.screenshot({path: `${output}/desktop.png`, fullPage: true});
-  await page.select('#mode', 'latitude');
+  await page.select('#mode', 'scale');
+  const before = await page.evaluate(() => ({scale: latitudeDemo.groundScale(latitudeDemo.standard.getZoom(), latitudeDemo.standard.getCenter().lat), width: document.querySelector('#enhanced-width').textContent}));
   await page.select('#place', 'singapore');
   await page.waitForFunction(() => latitudeDemo.enhanced.loaded(), {timeout: 60000});
   assert(await page.evaluate(() => {
     const {standard:a, enhanced:b} = latitudeDemo;
-    return a.getZoom() === 16 && a.getCenter().lat === b.getCenter().lat && a.getCenter().lng === b.getCenter().lng;
+    return a.getZoom() > 16 && a.getCenter().lat === b.getCenter().lat && a.getCenter().lng === b.getCenter().lng;
   }));
+  const after = await page.evaluate(() => ({scale: latitudeDemo.groundScale(latitudeDemo.standard.getZoom(), latitudeDemo.standard.getCenter().lat), width: document.querySelector('#enhanced-width').textContent}));
+  assert(Math.abs(before.scale - after.scale) < 1e-10);
+  assert.equal(before.width, after.width);
+  results.checks.push('City changes preserve meters per pixel and Bright scale-based street widths while adjusting zoom.');
   await page.evaluate(() => latitudeDemo.enhanced.jumpTo({center: [2.349, 48.858], zoom: 16.5, bearing: 20, pitch: 30}));
   assert(await page.evaluate(() => {
     const {standard:a, enhanced:b} = latitudeDemo;
@@ -95,6 +100,15 @@ try {
   const stateWidth = await widthAt(60);
   assert(Math.abs(stateWidth - 28) <= 1, `feature state width: ${stateWidth}`);
   results.pixelWidths.push({path:'feature state',latitude:60,width:stateWidth,expected:28});
+  await probe.evaluate(() => probeMap.setPaintProperty('road','line-width',
+    ['/', ['*', ['get','width'], 2 * Math.PI * 6371008.8 / (512 * 2 ** 6)], ['scale']]));
+  for (const [latitude, zoom] of [[0,6],[60,5],[-60,5],[0,6]]) {
+    await probe.evaluate(zoom => probeMap.jumpTo({zoom}), zoom);
+    const width = await widthAt(latitude);
+    assert(Math.abs(width - 10) <= 1, `scale width at ${latitude}, zoom ${zoom}: ${width}`);
+    results.pixelWidths.push({path:'scale feature paint',latitude,zoom,width,expected:10});
+  }
+  results.checks.push('Rendered feature widths remain equal at equal ground scale across latitude and zoom changes.');
   await probe.evaluate(() => {
     probeMap.removeLayer('road');
     probeMap.removeSource('roads');

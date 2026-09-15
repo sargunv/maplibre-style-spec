@@ -1,9 +1,11 @@
 # Camera latitude experiment
 
-Two synchronized maps compare an unchanged snapshot of OpenFreeMap Bright with latitude-aware road styling. Both maps use the same patched GL JS renderer. No application code injects latitude into the style or rewrites widths on camera moves.
+Two synchronized maps compare an unchanged snapshot of OpenFreeMap Bright with scale-aware road styling. Both maps use the same patched GL JS renderer. No application code injects latitude or scale into the style or rewrites widths on camera moves.
 
-- **Constant ground widths:** base-2 zoom interpolation and a cosine latitude correction. Widths are estimates by road class, not measurements from OpenStreetMap: paths 2 m, tracks 3 m, service roads 5 m, local streets and links 7 m, secondary/tertiary roads 12 m, primary/trunk roads 16 m, motorways 22 m. Casings add 2 m.
-- **Bright + latitude correction:** preserves each original zoom curve and multiplies width outputs by `cos(45°) / cos(latitude)`. The two styles match at 45°. This mode isolates latitude correction and does not promise constant ground size while zooming.
+- **Constant ground widths:** a direct `meters / ["scale"]` expression. Widths are estimates by road class, not measurements from OpenStreetMap: paths 2 m, tracks 3 m, service roads 5 m, local streets and links 7 m, secondary/tertiary roads 12 m, primary/trunk roads 16 m, motorways 22 m. Casings add 2 m.
+- **Bright + scale correction:** replaces the original zoom input with `log2(S0 / scale)`, where `S0` is zoom-0 meters per pixel at 45°. This evaluates Bright’s existing curves at an equivalent ground scale instead of multiplying their outputs. At equal meters per pixel, the enhanced widths are equal across cities. Labels, visibility and opacity still use the original Bright zoom rules.
+
+City changes preserve meters per pixel by adjusting zoom by `log2(cos(newLatitude) / cos(oldLatitude))`, within camera zoom limits. Reset restores the initial ground scale at the selected city.
 
 The change applies to road strokes, casings, bridges, tunnels and paths. Other basemap layers retain Bright's styling. Map-center scale is an approximation for a flat Mercator view, not exact sizing everywhere on a globe or under perspective and terrain.
 
@@ -22,11 +24,11 @@ Renderer base: `dda75ad45d7e9d19f56af30da37780e28bc43a33` (GL JS 6.9.1). The che
 
 ## Implementation
 
-The spec adds `latitude` to numeric expressions and evaluation globals, prevents constant folding, preserves latitude when global state is merged, and exposes an independent `isLatitudeDependent` flag. The existing expression `kind` continues to describe zoom/feature dependency. Latitude is accepted where camera expressions are supported and rejected in filters and cluster expressions. The SDK support table is intentionally empty: this experimental fork does not claim an upstream release or Native implementation.
+The spec adds `latitude` and `scale` to numeric expressions and evaluation globals, prevents constant folding, preserves latitude when global state is merged, and exposes independent `isLatitudeDependent` and `isScaleDependent` flags. The existing expression `kind` continues to describe zoom/feature dependency. Both inputs are accepted where camera expressions are supported and rejected in filters and cluster expressions. The SDK support table is intentionally empty: this experimental fork does not claim an upstream release or Native implementation.
 
-GL JS passes the camera's latitude to paint/layout evaluation and schedules reevaluation when it changes, including pans at fixed zoom. The main style retains the original expression. Worker layer snapshots bind latitude to a number, so existing tile-building code can evaluate feature and layout expressions without a new worker-global protocol. Feature-state updates retain the current evaluation latitude.
+GL JS passes the camera's latitude and nominal Mercator ground scale to paint/layout evaluation and schedules reevaluation when it changes, including pans at fixed zoom. The main style retains the original expression. Worker layer snapshots bind these camera inputs to numbers, so existing tile-building code can evaluate feature and layout expressions without a new worker-global protocol. Feature-state updates retain the current evaluation latitude.
 
-Camera-only paint values use uniforms and require no tile rebuild. Latitude-dependent layout or feature paint requires rebuilding affected source tiles. That path is asynchronous and may lag during continuous movement; it is functional but more expensive than camera-only paint. The Bright comparison uses camera-only expressions. Per-frame, feature-dependent camera evaluation would warrant a separate renderer optimization before broad production use.
+Camera-only paint values use uniforms and require no tile rebuild. Camera-dependent layout or feature paint requires rebuilding affected source tiles. That path is asynchronous and may lag during continuous movement; it is functional but more expensive than camera-only paint. The Bright comparison uses camera-only expressions. Per-frame, feature-dependent camera evaluation would warrant a separate renderer optimization before broad production use.
 
 ## Verify
 
@@ -36,7 +38,7 @@ From this repository root, after building, with a GL JS checkout containing its 
 CHROME_BIN=/path/to/chrome node demos/latitude/verify.mjs /path/to/maplibre-gl-js
 ```
 
-An optional third argument selects a deployed demo URL. The browser test checks both sizing modes, synchronization in both directions, unchanged baseline layers, mobile overflow, and rendered pixel widths at 0°, 60° and −60°. It also exercises feature-driven paint, feature-state changes, cached tile revisits and symbol layout. Screenshots and JSON results are saved in the ignored `test-results/` directory. The small readout evaluator is only for captions; rendered-pixel tests verify the actual patched renderer independently.
+An optional third argument selects a deployed demo URL. The browser test checks city-scale preservation, both sizing modes, synchronization in both directions, unchanged baseline layers, mobile overflow, and rendered pixel widths at 0°, 60° and −60°. It also exercises feature-driven paint, feature-state changes, cached tile revisits and symbol layout. Screenshots and JSON results are saved in the ignored `test-results/` directory. The small readout evaluator is only for captions; rendered-pixel tests verify the actual patched renderer independently.
 
 ## Publish
 

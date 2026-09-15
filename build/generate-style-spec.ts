@@ -320,6 +320,7 @@ export type ExpressionSpecification =
     // Zoom
     | ['zoom'] // number
     | ['latitude'] // number
+    | ['scale'] // number
     // Heatmap
     | ['heatmap-density'] // number
     // Elevation

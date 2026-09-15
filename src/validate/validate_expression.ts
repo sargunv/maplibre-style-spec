@@ -27,13 +27,13 @@ export function validateExpression(options: any): Array<ValidationError> {
 
     if (
         options.expressionContext !== 'property' &&
-        !isGlobalPropertyConstant(expressionObj, ['latitude'])
+        !isGlobalPropertyConstant(expressionObj, ['latitude', 'scale'])
     ) {
         return [
             new ValidationError(
                 options.key,
                 options.value,
-                '"latitude" expressions are only supported in camera-enabled style properties.'
+                '"latitude" and "scale" expressions are only supported in camera-enabled style properties.'
             )
         ];
     }

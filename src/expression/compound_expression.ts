@@ -278,6 +278,19 @@ CompoundExpression.register(expressions, {
     'geometry-type': [StringType, [], (ctx) => ctx.geometryType()],
     id: [ValueType, [], (ctx) => ctx.id()],
     zoom: [NumberType, [], (ctx) => ctx.globals.zoom],
+    scale: [
+        NumberType,
+        [],
+        (ctx) => {
+            const scale = ctx.globals.scale;
+            if (typeof scale !== 'number' || !Number.isFinite(scale) || scale <= 0) {
+                throw new Error(
+                    'The scale expression requires a positive ground resolution in meters per pixel.'
+                );
+            }
+            return scale;
+        }
+    ],
     latitude: [
         NumberType,
         [],
@@ -616,6 +629,7 @@ function isExpressionConstant(expression: Expression) {
         isGlobalPropertyConstant(expression, [
             'zoom',
             'latitude',
+            'scale',
             'heatmap-density',
             'elevation',
             'line-progress',

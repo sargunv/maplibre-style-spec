@@ -86,4 +86,35 @@ describe('latitude', () => {
         if (literal.result !== 'success') throw new Error('parse failed');
         expect(literal.value.evaluate({zoom: 0})).toEqual(['latitude']);
     });
+    test('scale supports arithmetic, interpolation and global state without constant folding', () => {
+        const result = createPropertyExpression(
+            ['/', ['global-state', 'meters'], ['scale']],
+            'line-width',
+            widthSpec,
+            {meters: 10}
+        );
+        if (result.result !== 'success') throw new Error('parse failed');
+        expect(result.value.isScaleDependent).toBe(true);
+        expect(result.value.isLatitudeDependent).toBe(false);
+        expect(result.value.evaluate({zoom: 16, scale: 0.5})).toBe(20);
+        expect(result.value.evaluate({zoom: 17, scale: 0.25})).toBe(40);
+        const raw = createExpression(['scale'], 'test');
+        if (raw.result !== 'success') throw new Error('parse failed');
+        for (const scale of [undefined, 0, -1, Infinity]) {
+            expect(() => raw.value.evaluateWithoutErrorHandling({zoom: 0, scale})).toThrow(
+                'positive ground resolution'
+            );
+        }
+        expect(
+            validateExpression({key: 'test', value: ['scale'], expressionContext: 'filter'})
+        ).toHaveLength(1);
+        const curve = createPropertyExpression(
+            ['interpolate', ['exponential', 1.2], ['log2', ['/', 1024, ['scale']]], 0, 1, 10, 20],
+            'line-width',
+            widthSpec
+        );
+        if (curve.result !== 'success') throw new Error('parse failed');
+        expect(curve.value.evaluate({zoom: 4, scale: 1})).toBe(20);
+        expect(curve.value.evaluate({zoom: 12, scale: 1})).toBe(20);
+    });
 });

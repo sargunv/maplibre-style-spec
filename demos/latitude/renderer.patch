@@ -1,90 +1,95 @@
 diff --git a/src/data/program_configuration.ts b/src/data/program_configuration.ts
-index 199abbb95..80361262b 100644
+index 199abbb95..1590aede4 100644
 --- a/src/data/program_configuration.ts
 +++ b/src/data/program_configuration.ts
-@@ -54,6 +54,7 @@ type PaintOptions = {
+@@ -54,6 +54,8 @@ type PaintOptions = {
      canonical?: CanonicalTileID;
      formattedSection?: FormattedSection;
      globalState?: Record<string, any>;
 +    latitude?: number;
++    scale?: number;
  };
  
  /**
-@@ -587,7 +588,7 @@ export class ProgramConfiguration {
+@@ -587,7 +589,7 @@ export class ProgramConfiguration {
                          //AHM: Remove after https://github.com/mapbox/mapbox-gl-js/issues/6255
                          const value = (layer.paint as any).get(property);
                          binder.expression = value.value;
 -                        binder.updatePaintArray(pos.start, pos.end, feature, fs.state, options);
-+                        binder.updatePaintArray(pos.start, pos.end, feature, fs.state, {...options, latitude: value.parameters.latitude});
++                        binder.updatePaintArray(pos.start, pos.end, feature, fs.state, {...options, latitude: value.parameters.latitude, scale: value.parameters.scale});
                          dirty = true;
                      }
                  }
-diff --git a/src/style/bind_camera_latitude.ts b/src/style/bind_camera_latitude.ts
+diff --git a/src/style/bind_camera_parameters.ts b/src/style/bind_camera_parameters.ts
 new file mode 100644
-index 000000000..690b394af
+index 000000000..a87bb3d3e
 --- /dev/null
-+++ b/src/style/bind_camera_latitude.ts
-@@ -0,0 +1,30 @@
++++ b/src/style/bind_camera_parameters.ts
+@@ -0,0 +1,31 @@
 +import type {LayerSpecification} from '@maplibre/maplibre-gl-style-spec';
 +
 +/**
-+ * Binds camera latitude in worker paint and layout expressions to a tile-build snapshot.
++ * Binds camera latitude and scale in worker paint and layout expressions to a tile-build snapshot.
 + * Literal data, source metadata, and the main-thread style remain unchanged. Workers can then
 + * use their existing zoom/feature evaluation and buffer construction paths.
 + */
-+export function bindCameraLatitude(layer: LayerSpecification, latitude: number | undefined): LayerSpecification {
-+    if (latitude === undefined) return layer;
++export function bindCameraParameters(layer: LayerSpecification, latitude: number | undefined, scale?: number): LayerSpecification {
++    if (latitude === undefined && scale === undefined) return layer;
 +    const result = {...layer};
 +    for (const section of ['paint', 'layout'] as const) {
 +        if (!layer[section]) continue;
 +        result[section] = Object.fromEntries(Object.entries(layer[section]).map(([name, value]) =>
-+            [name, bindValue(value, latitude)]));
++            [name, bindValue(value, latitude, scale)]));
 +    }
 +    return result;
 +}
 +
 +/** Recursively binds expression arguments, including formatting options, while preserving literals. */
-+function bindValue(value: unknown, latitude: number): unknown {
++function bindValue(value: unknown, latitude: number | undefined, scale?: number): unknown {
 +    if (Array.isArray(value)) {
 +        if (value[0] === 'literal') return value;
-+        if (value.length === 1 && value[0] === 'latitude') return latitude;
-+        return value.map(argument => bindValue(argument, latitude));
++        if (value.length === 1 && value[0] === 'latitude' && latitude !== undefined) return latitude;
++        if (value.length === 1 && value[0] === 'scale' && scale !== undefined) return scale;
++        return value.map(argument => bindValue(argument, latitude, scale));
 +    }
 +    if (value && typeof value === 'object') {
-+        return Object.fromEntries(Object.entries(value).map(([key, argument]) => [key, bindValue(argument, latitude)]));
++        return Object.fromEntries(Object.entries(value).map(([key, argument]) => [key, bindValue(argument, latitude, scale)]));
 +    }
 +    return value;
 +}
 diff --git a/src/style/evaluation_parameters.ts b/src/style/evaluation_parameters.ts
-index d38f0e47b..f189c8369 100644
+index d38f0e47b..704874658 100644
 --- a/src/style/evaluation_parameters.ts
 +++ b/src/style/evaluation_parameters.ts
-@@ -15,6 +15,7 @@ export type CrossfadeParameters = {
+@@ -15,6 +15,8 @@ export type CrossfadeParameters = {
   */
  export class EvaluationParameters implements GlobalProperties {
      zoom: number;
 +    latitude?: number;
++    scale?: number;
      now: number;
      fadeDuration: number;
      zoomHistory: ZoomHistory;
-@@ -22,6 +23,7 @@ export class EvaluationParameters implements GlobalProperties {
+@@ -22,6 +24,9 @@ export class EvaluationParameters implements GlobalProperties {
      // "options" may also be another EvaluationParameters to copy, see CrossFadedProperty.possiblyEvaluate
      constructor(zoom: number, options?: any) {
          this.zoom = zoom;
 +        this.latitude = options?.latitude;
++        this.scale = options?.scale ?? (this.latitude === undefined ? undefined :
++            2 * Math.PI * 6371008.8 * Math.cos(this.latitude * Math.PI / 180) / (512 * 2 ** zoom));
  
          if (options) {
              this.now = options.now || 0;
 diff --git a/src/style/latitude.test.ts b/src/style/latitude.test.ts
 new file mode 100644
-index 000000000..013a78f7a
+index 000000000..7bbebaa8b
 --- /dev/null
 +++ b/src/style/latitude.test.ts
 @@ -0,0 +1,48 @@
 +import {describe, expect, test} from 'vitest';
 +import {createStyleLayer} from './create_style_layer.ts';
 +import {EvaluationParameters} from './evaluation_parameters.ts';
-+import {bindCameraLatitude} from './bind_camera_latitude.ts';
++import {bindCameraParameters} from './bind_camera_parameters.ts';
 +import {LineFloorwidthProperty} from './style_layer/line_style_layer.ts';
 +import lineProperties from './style_layer/line_style_layer_properties.g.ts';
 +import {PropertyValue} from './properties.ts';
@@ -98,8 +103,8 @@ index 000000000..013a78f7a
 +                0, ['/', 1, ['cos', ['*', ['latitude'], ['/', ['pi'], 180]]]],
 +                1, ['/', 2, ['cos', ['*', ['latitude'], ['/', ['pi'], 180]]]]]
 +        }}, {}) as LineStyleLayer;
-+        expect(layer.isLatitudeDependent).toBe(true);
-+        expect(layer.latitudeRequiresRelayout).toBe(false);
++        expect(layer.isViewDependent).toBe(true);
++        expect(layer.viewRequiresRelayout).toBe(false);
 +        for (const latitude of [0, 60, -60]) {
 +            layer.recalculate(new EvaluationParameters(0.5, {latitude}), []);
 +            const scale = 1 / Math.cos(latitude * Math.PI / 180);
@@ -117,78 +122,90 @@ index 000000000..013a78f7a
 +            paint: {'line-width': ['+', ['abs', ['latitude']], ['get', 'width']]}
 +        };
 +        const layer = createStyleLayer(definition, {}) as LineStyleLayer;
-+        expect(layer.latitudeRequiresRelayout).toBe(true);
-+        const worker = createStyleLayer(bindCameraLatitude(definition, -60), {}) as LineStyleLayer;
++        expect(layer.viewRequiresRelayout).toBe(true);
++        const worker = createStyleLayer(bindCameraParameters(definition, -60), {}) as LineStyleLayer;
 +        worker.recalculate(new EvaluationParameters(0), []);
 +        expect(worker.paint.get('line-width').evaluate({type: 2, properties: {width: 7}}, {})).toBe(67);
 +        expect(worker.layout.get('line-sort-key').constantOr(0)).toBe(60);
-+        expect(worker.isLatitudeDependent).toBe(false);
++        expect(worker.isViewDependent).toBe(false);
 +        expect(layer.getPaintProperty('line-width')).toEqual(definition.paint['line-width']);
-+        expect(bindCameraLatitude(definition, 10).metadata).toEqual(definition.metadata);
++        expect(bindCameraParameters(definition, 10).metadata).toEqual(definition.metadata);
 +        const literal: LayerSpecification = {id: 'symbol', type: 'symbol', source: 'roads', layout: {'text-font': ['literal', ['latitude']]}};
-+        expect(bindCameraLatitude(literal, 60)).toEqual(literal);
++        expect(bindCameraParameters(literal, 60)).toEqual(literal);
 +    });
 +});
 diff --git a/src/style/style.ts b/src/style/style.ts
-index 06d522fe1..54ac5a60b 100644
+index 06d522fe1..7b9e00d6d 100644
 --- a/src/style/style.ts
 +++ b/src/style/style.ts
 @@ -1,4 +1,5 @@
  import {mat4} from 'gl-matrix';
-+import {bindCameraLatitude} from './bind_camera_latitude.ts';
++import {bindCameraParameters} from './bind_camera_parameters.ts';
  import {throwIfAborted} from '../util/abort_error.ts';
  import {ErrorEvent, Evented} from '../util/evented.ts';
  import {MapSourceDataEvent, MapStyleDataEvent, MapStyleLoadEvent, type MapEventType} from '../ui/events.ts';
-@@ -236,6 +237,8 @@ export class Style extends Evented<MapEventType> {
+@@ -39,7 +40,7 @@ import type Point from '@mapbox/point-geometry';
+ import type {Map} from '../ui/map.ts';
+ import type {IReadonlyTransform, ITransform} from '../geo/transform_interface.ts';
+ import type {StyleImage} from './style_image.ts';
+-import type {EvaluationParameters} from './evaluation_parameters.ts';
++import {EvaluationParameters} from './evaluation_parameters.ts';
+ import type {Placement} from '../symbol/placement.ts';
+ import type {
+     LayerSpecification,
+@@ -236,6 +237,9 @@ export class Style extends Evented<MapEventType> {
      _symbolPlacementTriggered: boolean;
      _placedProjectionTransition: number;
      _globalState: Record<string, any>;
 +    /** Camera latitude used for the latest style evaluation and worker snapshots. */
 +    cameraLatitude?: number;
++    cameraScale?: number;
      crossTileSymbolIndex: CrossTileSymbolIndex;
      pauseablePlacement: PauseablePlacement;
      placement: Placement;
-@@ -509,12 +512,13 @@ export class Style extends Evented<MapEventType> {
+@@ -509,12 +513,14 @@ export class Style extends Evented<MapEventType> {
  
      private _createLayers() {
          const dereferencedLayers = derefLayers(this.stylesheet.layers);
 +        this.cameraLatitude = this.map.getCenter().lat;
++        this.cameraScale = new EvaluationParameters(this.map.getZoom(), {latitude: this.cameraLatitude}).scale;
  
          this.setGlobalState(this.stylesheet.state ?? null);
  
          // Broadcast layers to workers first, so that expensive style processing (createStyleLayer)
          // can happen in parallel on both main and worker threads.
 -        this.dispatcher.broadcast(MessageType.setLayers, dereferencedLayers);
-+        this.dispatcher.broadcast(MessageType.setLayers, dereferencedLayers.map(layer => bindCameraLatitude(layer, this.cameraLatitude)));
++        this.dispatcher.broadcast(MessageType.setLayers, dereferencedLayers.map(layer => bindCameraParameters(layer, this.cameraLatitude, this.cameraScale)));
  
          this._order = dereferencedLayers.map((layer) => layer.id);
          this._layers = {};
-@@ -705,6 +709,8 @@ export class Style extends Evented<MapEventType> {
+@@ -705,6 +711,8 @@ export class Style extends Evented<MapEventType> {
              return;
          }
  
-+        this.updateCameraLatitude(parameters.latitude);
++        this.updateCameraParameters(parameters);
 +
          const changed = this._changed;
          if (changed) {
              if (this._imagesListDirty) {
-@@ -811,9 +817,28 @@ export class Style extends Evented<MapEventType> {
+@@ -811,9 +819,29 @@ export class Style extends Evented<MapEventType> {
          }
      }
  
 +    /**
-+     * Updates worker expression snapshots and rebuilds only sources whose buffers depend on latitude.
++     * Updates worker expression snapshots and rebuilds only sources whose buffers depend on camera latitude or scale.
 +     * Camera-only paint values are evaluated on the main thread each frame and need no tile reload.
 +     */
-+    private updateCameraLatitude(latitude: number | undefined): void {
-+        if (latitude === undefined || latitude === this.cameraLatitude) return;
++    private updateCameraParameters({latitude, scale}: EvaluationParameters): void {
++        if (latitude === undefined || (latitude === this.cameraLatitude && scale === this.cameraScale)) return;
 +        this.cameraLatitude = latitude;
++        this.cameraScale = scale;
 +        const updatedIds: string[] = [];
 +        const sources = new Set<string>();
 +        for (const layer of Object.values(this._layers)) {
-+            if (!layer.isLatitudeDependent) continue;
++            if (!layer.isViewDependent) continue;
 +            updatedIds.push(layer.id);
-+            if (layer.latitudeRequiresRelayout && layer.source) sources.add(layer.source);
++            if (layer.viewRequiresRelayout && layer.source) sources.add(layer.source);
 +        }
 +        if (updatedIds.length) this._updateWorkerLayers(updatedIds, []);
 +        for (const source of sources) this._reloadSource(source);
@@ -198,29 +215,29 @@ index 06d522fe1..54ac5a60b 100644
      _updateWorkerLayers(updatedIds: string[], removedIds: string[]): void {
          this.dispatcher.broadcast(MessageType.updateLayers, {
 -            layers: this._serializeByIds(updatedIds, false),
-+            layers: this._serializeByIds(updatedIds, false).map(layer => bindCameraLatitude(layer, this.cameraLatitude)),
++            layers: this._serializeByIds(updatedIds, false).map(layer => bindCameraParameters(layer, this.cameraLatitude, this.cameraScale)),
              removedIds
          });
      }
 diff --git a/src/style/style_layer.ts b/src/style/style_layer.ts
-index 34a26ddc3..6e3f41c89 100644
+index 34a26ddc3..ca4d649ad 100644
 --- a/src/style/style_layer.ts
 +++ b/src/style/style_layer.ts
 @@ -182,6 +182,19 @@ export abstract class StyleLayer extends Evented<ErrorEventType> {
          return this._unevaluatedLayout.getValue(name);
      }
  
-+    /** Whether any paint or layout expression observes camera latitude. */
-+    get isLatitudeDependent(): boolean {
-+        return Object.values(this._unevaluatedLayout?._values ?? {}).some(value => value.expression.isLatitudeDependent) ||
-+            Object.values(this._transitionablePaint?._values ?? {}).some(value => value.value.expression.isLatitudeDependent);
++    /** Whether any paint or layout expression observes camera latitude or scale. */
++    get isViewDependent(): boolean {
++        return Object.values(this._unevaluatedLayout?._values ?? {}).some(value => (value.expression.isLatitudeDependent || value.expression.isScaleDependent)) ||
++            Object.values(this._transitionablePaint?._values ?? {}).some(value => (value.value.expression.isLatitudeDependent || value.value.expression.isScaleDependent));
 +    }
 +
-+    /** Latitude-dependent layout and feature attributes are baked into worker tile buffers. */
-+    get latitudeRequiresRelayout(): boolean {
-+        return Object.values(this._unevaluatedLayout?._values ?? {}).some(value => value.expression.isLatitudeDependent) ||
++    /** Camera-dependent layout and feature attributes are baked into worker tile buffers. */
++    get viewRequiresRelayout(): boolean {
++        return Object.values(this._unevaluatedLayout?._values ?? {}).some(value => (value.expression.isLatitudeDependent || value.expression.isScaleDependent)) ||
 +            Object.values(this._transitionablePaint?._values ?? {}).some(value =>
-+                value.value.expression.isLatitudeDependent && value.value.isDataDriven());
++                (value.value.expression.isLatitudeDependent || value.value.expression.isScaleDependent) && value.value.isDataDriven());
 +    }
 +
      /**
@@ -260,7 +277,7 @@ index d7fee72b9..da6cc33b4 100644
                  zoomHistory: this.style.zoomHistory,
                  transition: this.style.getTransition()
 diff --git a/src/util/test/util.ts b/src/util/test/util.ts
-index 383543d99..3da1e5ede 100644
+index 383543d99..1ef66d2c1 100644
 --- a/src/util/test/util.ts
 +++ b/src/util/test/util.ts
 @@ -1,4 +1,5 @@
@@ -269,10 +286,14 @@ index 383543d99..3da1e5ede 100644
  import {Map, type MapOptions} from '../../ui/map.ts';
  import {NullWebGL2RenderingContext} from './null_gl.ts';
  import {extend} from '../../util/util.ts';
-@@ -39,6 +40,10 @@ export class StubMap extends Evented {
+@@ -39,6 +40,14 @@ export class StubMap extends Evented {
          return 1;
      }
  
++    getZoom(): number {
++        return this.transform.zoom;
++    }
++
 +    getCenter(): LngLat {
 +        return this.transform.center;
 +    }
@@ -281,7 +302,7 @@ index 383543d99..3da1e5ede 100644
          return 1;
      }
 diff --git a/test/build/bundle_size.json b/test/build/bundle_size.json
-index 3cc2af511..0f8869d38 100644
+index 3cc2af511..9f88a739f 100644
 --- a/test/build/bundle_size.json
 +++ b/test/build/bundle_size.json
 @@ -1,14 +1,14 @@
@@ -289,8 +310,8 @@ index 3cc2af511..0f8869d38 100644
      "dist/maplibre-gl.mjs": {
 -        "raw": 585008,
 -        "gzip": 148733
-+        "raw": 586103,
-+        "gzip": 149171
++        "raw": 586342,
++        "gzip": 149248
      },
      "dist/maplibre-gl-worker.mjs": {
          "raw": 19006,
@@ -299,7 +320,7 @@ index 3cc2af511..0f8869d38 100644
      "dist/maplibre-gl-shared.mjs": {
 -        "raw": 513697,
 -        "gzip": 147461
-+        "raw": 514878,
-+        "gzip": 147755
++        "raw": 515576,
++        "gzip": 147924
      }
  }

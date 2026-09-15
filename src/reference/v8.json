@@ -4824,6 +4824,24 @@
           }
         }
       },
+      "scale": {
+        "doc": "Returns nominal map-center ground resolution in meters per CSS pixel. Smaller values mean a closer view. In this experimental Mercator implementation, scale is 2 * pi * 6371008.8 * cos(latitude) / (512 * 2^zoom), independent of pitch, bearing, and device pixel ratio. This is not a perspective or terrain measurement. Available in camera-enabled paint and layout properties, including arithmetic and interpolation inputs. Projection-independent semantics remain under discussion.",
+        "syntax": {
+          "overloads": [
+            {
+              "parameters": [],
+              "output-type": "number"
+            }
+          ]
+        },
+        "example": [
+          "scale"
+        ],
+        "group": "Zoom",
+        "sdk-support": {
+          "basic functionality": {}
+        }
+      },
       "latitude": {
         "doc": "Returns the geographic latitude of the current map center in degrees, positive north and negative south, between -90 and 90. Available in paint and layout properties that support zoom expressions. Latitude can be used in arithmetic and updates continuously as the map center changes, even at constant zoom. It is a camera input, not a feature or tile latitude. Ground-size conversions based on this value approximate local scale near the map center; they do not guarantee ground dimensions across the viewport, under pitch, on globe, or over terrain.",
         "syntax": {

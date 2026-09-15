@@ -101,6 +101,8 @@ export type GlobalProperties = Readonly<{
     zoom: number;
     /** Geographic map center latitude in degrees, positive north. */
     latitude?: number;
+    /** Nominal map-center ground resolution in meters per CSS pixel. */
+    scale?: number;
     heatmapDensity?: number;
     elevation?: number;
     lineProgress?: number;
@@ -293,6 +295,7 @@ export class ZoomConstantExpression<Kind extends EvaluationKind> {
     isStateDependent: boolean;
     globalStateRefs: Set<string>;
     readonly isLatitudeDependent?: boolean;
+    readonly isScaleDependent?: boolean;
     _styleExpression: StyleExpression;
     readonly _globalState: Record<string, any>;
 
@@ -303,6 +306,7 @@ export class ZoomConstantExpression<Kind extends EvaluationKind> {
             kind !== ('constant' as EvaluationKind) && !isStateConstant(expression.expression);
         this.globalStateRefs = findGlobalStateRefs(expression.expression);
         this.isLatitudeDependent = !isGlobalPropertyConstant(expression.expression, ['latitude']);
+        this.isScaleDependent = !isGlobalPropertyConstant(expression.expression, ['scale']);
         this._globalState = globalState;
     }
 
@@ -355,6 +359,7 @@ export class ZoomDependentExpression<Kind extends EvaluationKind> {
     isStateDependent: boolean;
     globalStateRefs: Set<string>;
     readonly isLatitudeDependent?: boolean;
+    readonly isScaleDependent?: boolean;
     _styleExpression: StyleExpression;
     interpolationType: InterpolationType;
     readonly _globalState: Record<string, any>;
@@ -373,6 +378,7 @@ export class ZoomDependentExpression<Kind extends EvaluationKind> {
             kind !== ('camera' as EvaluationKind) && !isStateConstant(expression.expression);
         this.globalStateRefs = findGlobalStateRefs(expression.expression);
         this.isLatitudeDependent = !isGlobalPropertyConstant(expression.expression, ['latitude']);
+        this.isScaleDependent = !isGlobalPropertyConstant(expression.expression, ['scale']);
         this.interpolationType = interpolationType;
         this._globalState = globalState;
     }
@@ -438,6 +444,7 @@ export type ConstantExpression = {
     kind: 'constant';
     globalStateRefs: Set<string>;
     readonly isLatitudeDependent?: boolean;
+    readonly isScaleDependent?: boolean;
     readonly _globalState: Record<string, any>;
     readonly evaluate: (
         globals: GlobalProperties,
@@ -453,6 +460,7 @@ export type SourceExpression = {
     isStateDependent: boolean;
     globalStateRefs: Set<string>;
     readonly isLatitudeDependent?: boolean;
+    readonly isScaleDependent?: boolean;
     readonly _globalState: Record<string, any>;
     readonly evaluate: (
         globals: GlobalProperties,
@@ -468,6 +476,7 @@ export type CameraExpression = {
     kind: 'camera';
     globalStateRefs: Set<string>;
     readonly isLatitudeDependent?: boolean;
+    readonly isScaleDependent?: boolean;
     readonly _globalState: Record<string, any>;
     readonly evaluate: (
         globals: GlobalProperties,
@@ -486,6 +495,7 @@ export type CompositeExpression = {
     isStateDependent: boolean;
     globalStateRefs: Set<string>;
     readonly isLatitudeDependent?: boolean;
+    readonly isScaleDependent?: boolean;
     readonly _globalState: Record<string, any>;
     readonly evaluate: (
         globals: GlobalProperties,
@@ -526,6 +536,10 @@ export function createPropertyExpression(
 
     if (!isGlobalPropertyConstant(parsed, ['latitude']) && !supportsZoomExpression(propertySpec)) {
         return error([new ExpressionParsingError('', 'latitude expressions not supported')]);
+    }
+
+    if (!isGlobalPropertyConstant(parsed, ['scale']) && !supportsZoomExpression(propertySpec)) {
+        return error([new ExpressionParsingError('', 'scale expressions not supported')]);
     }
 
     const isZoomConstant = isGlobalPropertyConstant(parsed, ['zoom']);
@@ -844,6 +858,7 @@ function addGlobalState(
     const {
         zoom,
         latitude,
+        scale,
         heatmapDensity,
         elevation,
         lineProgress,
@@ -853,6 +868,7 @@ function addGlobalState(
     return {
         zoom,
         latitude,
+        scale,
         heatmapDensity,
         elevation,
         lineProgress,
