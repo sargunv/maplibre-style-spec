@@ -280,3 +280,26 @@ index 383543d99..3da1e5ede 100644
      getPixelRatio(): number {
          return 1;
      }
+diff --git a/test/build/bundle_size.json b/test/build/bundle_size.json
+index 3cc2af511..0f8869d38 100644
+--- a/test/build/bundle_size.json
++++ b/test/build/bundle_size.json
+@@ -1,14 +1,14 @@
+ {
+     "dist/maplibre-gl.mjs": {
+-        "raw": 585008,
+-        "gzip": 148733
++        "raw": 586103,
++        "gzip": 149171
+     },
+     "dist/maplibre-gl-worker.mjs": {
+         "raw": 19006,
+         "gzip": 6033
+     },
+     "dist/maplibre-gl-shared.mjs": {
+-        "raw": 513697,
+-        "gzip": 147461
++        "raw": 514878,
++        "gzip": 147755
+     }
+ }
