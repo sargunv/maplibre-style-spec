@@ -1,12 +1,12 @@
 {
-  "styleSpecCommit": "58ab36a2c6904ca6772279046532d3fbd589b61c",
+  "styleSpecCommit": "51bf9b0b13050b21598346a2f19c9d5b00acdd53",
   "styleSpecVersion": "26.4.2",
   "rendererBaseCommit": "dda75ad45d7e9d19f56af30da37780e28bc43a33",
-  "rendererPatchSha256": "d20a62499277811c6bd681935ae4f038ed404e8b1191b3cafe9fc37d841a070a",
+  "rendererPatchSha256": "5f6393ab4a78e538b81477b2f2bc45dd6f9c3c9b2718a1ebe9c7db2d57fcfd13",
   "brightStyleSha256": "ada317e9b31c65b726dc46a2b3b14acb9856782051a09e3f4bc92d034373999f",
   "brightStyleSource": "https://tiles.openfreemap.org/styles/bright",
-  "rendererBundleSha256": "e8650f6d3dafa9bc6356391e9a6c4da5f003791c74e0e166be7bb0d9f80cb02f",
-  "builtAt": "2026-09-15T08:16:30.761Z",
+  "rendererBundleSha256": "54ddcb8362236475201a2147cefe5931e64efd9fdae57f4a011f2d3d54e2e25a",
+  "builtAt": "2026-09-15T20:35:47.335Z",
   "node": "v24.21.0",
   "experimental": true
 }
