@@ -14,13 +14,13 @@
   </header>
   <nav aria-label="Comparison settings">
     <label>Go to <select id="place"><option value="helsinki">Helsinki · 60° N</option><option value="tromso">Tromsø · 70° N</option><option value="paris">Paris · 49° N</option><option value="singapore">Singapore · 1° N</option><option value="sydney">Sydney · 34° S</option></select></label>
-    <label>Right map <select id="mode"><option value="ground">Constant ground widths</option><option value="scale">Bright + scale correction</option></select></label>
+    <label>Right map <select id="mode"><option value="ground">Constant ground widths</option><option value="scale">Bright — road widths</option><option value="all">Bright — all expressions</option></select></label>
     <button id="reset" type="button">Reset view</button>
     <output id="camera" aria-label="Shared camera position">Loading maps…</output>
   </nav>
   <main>
     <section class="pane" aria-label="Standard Bright map">
-      <div class="pane-title"><h2>Standard Bright</h2><span>Original road widths</span></div>
+      <div class="pane-title"><h2>Standard Bright</h2><span>Original zoom-based styling</span></div>
       <div id="standard" class="map"></div>
       <div class="measurement"><span>Local-street width · center scale</span><strong id="standard-width">—</strong></div>
     </section>
