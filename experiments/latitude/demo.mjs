@@ -137,6 +137,10 @@ function reportError(error) {
 function setMode() {
   enhancedStyle = enhanceStyle(baseStyle, mode.value);
   enhanced.setStyle(enhancedStyle);
+  updateModeDescription();
+}
+
+function updateModeDescription() {
   document.querySelector('#mode-caption').textContent = mode.value === 'ground' ? 'Road widths in ground meters' : mode.value === 'all' ? 'All Bright expressions use ground scale' : 'Bright width curves use ground scale';
   document.querySelector('#explanation').textContent = mode.value === 'ground'
     ? 'Ground widths are estimates by road class: a local street is 7 m wide. Road casings, bridges, tunnels and paths scale together. These are styling choices, not surveyed road widths.'
@@ -165,7 +169,6 @@ try {
   document.querySelector('#place').addEventListener('change', event => changeCity(places[event.target.value]));
   mode.addEventListener('change', setMode);
   document.querySelector('#reset').addEventListener('click', () => { changeCity(places[document.querySelector('#place').value], initialScale); standard.jumpTo({bearing: 0, pitch: 0}); });
-  document.querySelector('#expression').textContent = JSON.stringify(groundWidth(7), null, 2);
-  updateReadout();
+  updateModeDescription();
   window.latitudeDemo = {standard, enhanced, errors, groundWidth, correctedWidth, enhanceStyle, groundScale, zoomForScale, get baseStyle() {return baseStyle;}, get enhancedStyle() {return enhancedStyle;}};
 } catch (error) { reportError(error); }

@@ -14,7 +14,7 @@
   </header>
   <nav aria-label="Comparison settings">
     <label>Go to <select id="place"><option value="helsinki">Helsinki · 60° N</option><option value="tromso">Tromsø · 70° N</option><option value="paris">Paris · 49° N</option><option value="singapore">Singapore · 1° N</option><option value="sydney">Sydney · 34° S</option></select></label>
-    <label>Right map <select id="mode"><option value="ground">Constant ground widths</option><option value="scale">Bright — road widths</option><option value="all">Bright — all expressions</option></select></label>
+    <label>Right map <select id="mode"><option value="all">Bright — all expressions</option><option value="scale">Bright — road widths</option><option value="ground">Constant ground widths</option></select></label>
     <button id="reset" type="button">Reset view</button>
     <output id="camera" aria-label="Shared camera position">Loading maps…</output>
   </nav>
@@ -25,14 +25,14 @@
       <div class="measurement"><span>Local-street width · center scale</span><strong id="standard-width">—</strong></div>
     </section>
     <section class="pane enhanced" aria-label="Scale-aware Bright map">
-      <div class="pane-title"><h2>Scale-aware Bright</h2><span id="mode-caption">Road widths in ground meters</span></div>
+      <div class="pane-title"><h2>Scale-aware Bright</h2><span id="mode-caption">All Bright expressions use ground scale</span></div>
       <div id="enhanced" class="map"></div>
       <div class="measurement"><span>Local-street width · center scale</span><strong id="enhanced-width">—</strong></div>
     </section>
   </main>
   <div id="error" role="alert" hidden></div>
   <footer>
-    <p id="explanation">Ground widths are estimates by road class: a local street is 7 m wide. Road casings, bridges, tunnels and paths scale together. These are styling choices, not surveyed road widths.</p>
+    <p id="explanation">All zoom-based paint and layout expressions use ground scale at a 45° reference: labels, icons, colors, opacity and widths. Layer visibility ranges and source tiles still use zoom; features missing from a tile cannot be restored by styling. Layout changes rebuild tiles and may lag while moving.</p>
     <p class="hint">Drag or zoom either map; the other follows. City changes keep ground scale (meters per pixel), adjusting zoom within camera limits. Ground sizing approximates scale near the center on flat Mercator; pitch, terrain and latitude variation across the view need more than this input.</p>
     <details><summary>How this works & source</summary><div class="details-body">
       <p>The experimental <code>["scale"]</code> expression returns nominal ground meters per CSS pixel at the map center. A 10-meter width is simply <code>["/", 10, ["scale"]]</code>. Bright’s curves use <code>log2(referenceScale / scale)</code> as their input. The renderer supplies scale; the page does not rewrite styles on camera moves.</p>
